@@ -8,30 +8,46 @@ import pydeck as pdk
 
 # ── Page Configuration ─────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Debug Olist Pipeline",
+    page_title="Olist Customer Characterization",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ── Data Download & Build with Debugging ────────────────────────────────────────
-@st.cache_data(show_spinner=False, ttl=0)  # disable cache persistence
+@st.cache_data(show_spinner=False, ttl=0)  # disable cache persistence for debugging
 def load_data():
-    # Correct Drive IDs: ensure each CSV uses its own ID
     FILE_IDS = {
-        "olist_category_name_translation.csv": "19YQGpVKifSM0qR04sCLUtiflz4RHX547",  # ~9 MB
-        "olist_customers_dataset.csv":         "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",  # ~2.6 KB
-        "olist_geolocation_dataset.csv":       "1s_L2-JC6MobsEmKNBQ41ezbCe6V3YrY4",
-        "olist_order_items_dataset.csv":       "1MqAAQcsyPV204GdnLHofHn1U8lJ4TYG4",
-        "olist_order_payments_dataset.csv":    "1koSHpwLEkbZ3Q4M5qxdn8vDBOqWxpefn",
-        "olist_order_reviews_dataset.csv":     "1GyDACu8Jt2DFA6ldl1BshL9_qpvSJsYb",
-        "olist_orders_dataset.csv":            "1Ux4yYn90rHv1gZBk-L2CgdZcNtEiabzD",
-        "olist_products_dataset.csv":          "1HHia6OiZA084ejjLIFm4qqyC_6df1FHh",
-        "olist_sellers_dataset.csv":           "1PYUU0pdkAE7xm1nXFFkIDHiR0-_VPuCt",
-    }
+    # Category translation (≈9 MB)
+    "olist_category_name_translation.csv": "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
+
+    # Sellers metadata (≈175 KB)
+    "olist_sellers_dataset.csv":           "1s_L2-JC6MobsEmKNBQ41ezbCe6V3YrY4",
+
+    # Order-products/payment mapping (≈2.4 MB)
+    "olist_products_dataset.csv":          "1Ux4yYn90rHv1gZBk-L2CgdZcNtEiabzD",
+
+    # Product specs (≈17.7 MB)
+    "olist_orders_dataset.csv":            "1MqAAQcsyPV204GdnLHofHn1U8lJ4TYG4",
+
+    # Customer reviews geolocation (≈61 MB)
+    "olist_order_reviews_dataset.csv":     "1koSHpwLEkbZ3Q4M5qxdn8vDBOqWxpefn",
+
+    # Order-payment records (≈14.5 MB)
+    "olist_order_payments_dataset.csv":    "1HHia6OiZA084ejjLIFm4qqyC_6df1FHh",
+
+    # Order-items master (≈15.4 MB)
+    "olist_order_items_dataset.csv":       "1PYUU0pdkAE7xm1nXFFkIDHiR0-_VPuCt",
+
+    # Customer geolocation lookup (≈61 MB)
+    "olist_geolocation_dataset.csv":       "1GyDACu8Jt2DFA6ldl1BshL9_qpvSJsYb",
+
+    # Small customer metadata (≈2.6 KB)
+    "olist_customers_dataset.csv":         "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
+}
     raw_dir = os.path.join("data", "raw")
     os.makedirs(raw_dir, exist_ok=True)
 
-    # 1) Download & verify files
+    # Download and check files
     for fname, fid in FILE_IDS.items():
         dest = os.path.join(raw_dir, fname)
         if not os.path.isfile(dest):
@@ -39,13 +55,14 @@ def load_data():
             gdown.download(
                 f"https://drive.google.com/uc?export=download&id={fid}",
                 dest,
-                quiet=False
+                quiet=False  # show download progress
             )
+        # Debug file existence and size
         exists = os.path.isfile(dest)
         size = os.path.getsize(dest) if exists else None
         st.write(f"File {fname} exists: {exists}, size: {size}")
 
-    # 2) Load each CSV and print its schema
+    # Load and inspect CSVs
     raw = {}
     for fname in FILE_IDS:
         path = os.path.join(raw_dir, fname)
@@ -57,7 +74,7 @@ def load_data():
             st.write(f"Error loading {fname}: {e}")
             raw[fname] = pd.DataFrame()
 
-    # 3) Assign DataFrames
+    # Map DataFrames
     customers_meta = raw["olist_category_name_translation.csv"]
     cat_translate  = raw["olist_customers_dataset.csv"]
     seller_meta    = raw["olist_geolocation_dataset.csv"]
@@ -68,12 +85,11 @@ def load_data():
     product_specs  = raw["olist_orders_dataset.csv"]
     sellers_df     = raw["olist_sellers_dataset.csv"]
 
-    # 4) Enrich customers with geolocation
+    # Enrich customers with geolocation
     geo_summary = (
         geoloc_meta
         .groupby("geolocation_zip_code_prefix")[["geolocation_lat","geolocation_lng"]]
-        .mean()
-        .reset_index()
+        .mean().reset_index()
     )
     st.write(f"geo_summary: shape={geo_summary.shape}, columns={geo_summary.columns.tolist()}")
     customers = customers_meta.merge(
@@ -84,11 +100,11 @@ def load_data():
     )
     st.write(f"After merging customers: shape={customers.shape}, columns={customers.columns.tolist()}")
 
-    # 5) Build fact table starting from sellers_df
+    # Build fact table starting from sellers_df
     df = sellers_df.copy()
     st.write(f"Start sellers_df: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 6) Merge order-level info
+    # Merge order-level info
     df = df.merge(
         orders_meta[["order_id","customer_id","order_purchase_timestamp"]],
         on="order_id",
@@ -96,11 +112,11 @@ def load_data():
     )
     st.write(f"After merging orders_meta: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 7) Merge customers
+    # Merge customers
     df = df.merge(customers, on="customer_id", how="left")
     st.write(f"After merging customers: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 8) Merge product specs
+    # Merge product specs
     df = df.merge(
         product_specs[["product_id","product_category_name"]],
         on="product_id",
@@ -108,7 +124,7 @@ def load_data():
     )
     st.write(f"After merging product_specs: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 9) Merge category translation
+    # Merge category translation
     df = df.merge(
         cat_translate[["product_category_name","product_category_name_english"]],
         on="product_category_name",
@@ -116,17 +132,25 @@ def load_data():
     ).rename(columns={"product_category_name_english":"category_name"})
     st.write(f"After merging cat_translate: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 10) Merge payments & reviews
-    df = df.merge(payments_meta[["order_id","payment_type","payment_value"]], on="order_id", how="left")
+    # Merge payments and reviews
+    df = df.merge(
+        payments_meta[["order_id","payment_type","payment_value"]],
+        on="order_id",
+        how="left"
+    )
     st.write(f"After merging payments: shape={df.shape}, columns={df.columns.tolist()}")
-    df = df.merge(reviews_meta[["order_id","review_score"]], on="order_id", how="left")
+    df = df.merge(
+        reviews_meta[["order_id","review_score"]],
+        on="order_id",
+        how="left"
+    )
     st.write(f"After merging reviews: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 11) Merge seller metadata
+    # Merge seller metadata
     df = df.merge(seller_meta, on="seller_id", how="left")
     st.write(f"After merging seller_meta: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # 12) Final cleaning
+    # Clean types
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     df["payment_value"]            = pd.to_numeric(df["payment_value"], errors="coerce")
     df["geolocation_lat"]          = pd.to_numeric(df["geolocation_lat"], errors="coerce")
@@ -135,7 +159,9 @@ def load_data():
 
     return df
 
-# ── Run & Display ──────────────────────────────────────────────────────────────
+# Load data and display first rows for sanity
 st.title("📊 Debugging Olist Data Pipeline")
 df = load_data()
 st.dataframe(df.head(10))
+
+# ... Then you can add visualization code below once pipeline is confirmed working ...

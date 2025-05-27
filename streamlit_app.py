@@ -66,7 +66,6 @@ def load_data():
 
     # ── Verify variable mappings ─────────────────────────────────────────────────
     st.write("### Verify variable mappings")
-    # Correct assignments:
     cat_translate  = raw["olist_category_name_translation.csv"]
     seller_meta    = raw["olist_sellers_dataset.csv"]
     product_specs  = raw["olist_products_dataset.csv"]

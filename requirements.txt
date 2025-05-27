@@ -1,5 +1,6 @@
 gdown
 pandas
 streamlit
+sqlite3
 ...
 

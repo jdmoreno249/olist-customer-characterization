@@ -20,32 +20,29 @@ def load_data():
         # Category translation (≈9 MB)
         "olist_category_name_translation.csv": "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
 
-        # Small customer metadata (≈2.6 KB)
+        # Customers dataset (≈2.6 KB)
         "olist_customers_dataset.csv":         "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
 
         # Sellers metadata (≈175 KB)
         "olist_sellers_dataset.csv":           "1s_L2-JC6MobsEmKNBQ41ezbCe6V3YrY4",
 
-        # Product specs (≈2.4 MB)
-        "olist_orders_dataset.csv":            "1Ux4yYn90rHv1gZBk-L2CgdZcNtEiabzD",
-
-        # Product category translation (≈71 rows)
-        "olist_customers_dataset.csv":         "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
-
         # Products measurements (≈5.78 MB)
         "olist_products_dataset.csv":          "1HHia6OiZA084ejjLIFm4qqyC_6df1FHh",
 
-        # Payments (≈2.38 MB)
-        "olist_order_payments_dataset.csv":    "1MqAAQcsyPV204GdnLHofHn1U8lJ4TYG4",
-
-        # Reviews (≈61.3 MB)
-        "olist_order_reviews_dataset.csv":     "1GyDACu8Jt2DFA6ldl1BshL9_qpvSJsYb",
+        # Product specs (≈2.38 MB)
+        "olist_orders_dataset.csv":            "1Ux4yYn90rHv1gZBk-L2CgdZcNtEiabzD",
 
         # Order items (≈17.7 MB)
-        "olist_order_items_dataset.csv":       "1koSHpwLEkbZ3Q4M5qxdn8vDBOqWxpefn",
+        "olist_order_items_dataset.csv":       "1MqAAQcsyPV204GdnLHofHn1U8lJ4TYG4",
 
-        # Geolocation lookup (≈15.4 MB)
-        "olist_geolocation_dataset.csv":       "1PYUU0pdkAE7xm1nXFFkIDHiR0-_VPuCt",
+        # Order payments (≈14.5 MB)
+        "olist_order_payments_dataset.csv":    "1koSHpwLEkbZ3Q4M5qxdn8vDBOqWxpefn",
+
+        # Order reviews (≈61.3 MB)
+        "olist_order_reviews_dataset.csv":     "1GyDACu8Jt2DFA6ldl1BshL9_qpvSJsYb",
+
+        # Geolocation lookup (≈61 MB)
+        "olist_geolocation_dataset.csv":       "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
     }
     raw_dir = os.path.join("data", "raw")
     os.makedirs(raw_dir, exist_ok=True)

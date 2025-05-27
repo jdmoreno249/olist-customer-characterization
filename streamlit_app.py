@@ -184,3 +184,4 @@ st.subheader("📈 Orders Over Time")
 df["month"] = df["order_purchase_timestamp"].dt.to_period("M").dt.to_timestamp()
 orders_ts = df.groupby("month").size().rename("Order Count")
 st.line_chart(orders_ts)
+

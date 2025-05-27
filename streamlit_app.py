@@ -2,7 +2,6 @@
 
 import os
 import gdown
-import sqlite3
 import pandas as pd
 import streamlit as st
 import pydeck as pdk
@@ -14,10 +13,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── Data Fetching, Joining & Cleaning ──────────────────────────────────────────
+# ── Data Download & Build ──────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data():
-    # 1) Download raw CSVs from Google Drive if not already present
+    # 1) Download raw CSVs if needed
     FILE_IDS = {
         "olist_customers_dataset.csv":         "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
         "olist_geolocation_dataset.csv":       "1s_L2-JC6MobsEmKNBQ41ezbCe6V3YrY4",
@@ -39,13 +38,8 @@ def load_data():
                 dest, quiet=True
             )
 
-    # 2) Load each CSV into a dict
-    raw = {
-        fname: pd.read_csv(os.path.join(raw_dir, fname))
-        for fname in FILE_IDS
-    }
-
-    # 3) Rename according to actual content
+    # 2) Load into pandas and rename
+    raw = {f: pd.read_csv(os.path.join(raw_dir, f)) for f in FILE_IDS}
     customers   = raw["olist_category_name_translation.csv"]
     cats        = raw["olist_customers_dataset.csv"]
     sellers     = raw["olist_geolocation_dataset.csv"]
@@ -56,162 +50,125 @@ def load_data():
     payments    = raw["olist_products_dataset.csv"]
     order_items = raw["olist_sellers_dataset.csv"]
 
-    # 4) Push to SQLite in memory
-    conn = sqlite3.connect(":memory:")
-    for name, df in [
-        ("customers",   customers),
-        ("cats",        cats),
-        ("sellers",     sellers),
-        ("orders",      orders),
-        ("reviews",     reviews),
-        ("geoloc",      geoloc),
-        ("products",    products),
-        ("payments",    payments),
-        ("order_items", order_items),
-    ]:
-        df.to_sql(name, conn, index=False, if_exists="replace")
-
-    # 5) Build joined order_lines table via SQL
-    order_lines_sql = """
-    WITH customer_geo AS (
-      SELECT
-        c.customer_id,
-        c.customer_unique_id,
-        c.customer_city,
-        c.customer_state,
-        AVG(g.geolocation_lat) AS geolocation_lat,
-        AVG(g.geolocation_lng) AS geolocation_lng
-      FROM customers c
-      JOIN geoloc g
-        ON c.customer_zip_code_prefix = g.geolocation_zip_code_prefix
-      GROUP BY
-        c.customer_id,
-        c.customer_unique_id,
-        c.customer_city,
-        c.customer_state
+    # 3) Enrich customers with geolocation
+    geo_summary = (
+        geoloc
+        .groupby("geolocation_zip_code_prefix")[["geolocation_lat","geolocation_lng"]]
+        .mean()
+        .reset_index()
     )
-    SELECT
-      o.order_id,
-      o.order_purchase_timestamp,
-      cg.customer_id,
-      cg.customer_unique_id,
-      cg.customer_city,
-      cg.customer_state,
-      cg.geolocation_lat,
-      cg.geolocation_lng,
-      i.product_id,
-      p.product_category_name      AS category_code,
-      cat.product_category_name_english AS category_name,
-      pay.payment_type,
-      pay.payment_value,
-      rev.review_score,
-      s.seller_id,
-      s.seller_zip_code_prefix,
-      s.seller_city,
-      s.seller_state
-    FROM orders o
-    LEFT JOIN customer_geo cg ON o.customer_id = cg.customer_id
-    LEFT JOIN order_items i   ON o.order_id = i.order_id
-    LEFT JOIN products p      ON i.product_id = p.product_id
-    LEFT JOIN cats cat        ON p.product_category_name = cat.product_category_name
-    LEFT JOIN payments pay    ON o.order_id = pay.order_id
-    LEFT JOIN reviews rev     ON o.order_id = rev.order_id
-    LEFT JOIN sellers s       ON i.seller_id = s.seller_id
-    """
-    df = pd.read_sql_query(order_lines_sql, conn, parse_dates=["order_purchase_timestamp"])
+    customers = customers.merge(
+        geo_summary,
+        left_on="customer_zip_code_prefix",
+        right_on="geolocation_zip_code_prefix",
+        how="left"
+    )
 
-    # 6) Final cleaning
+    # 4) Build order_lines via pandas merges
+    # 4a) orders + customers
+    df = orders.merge(
+        customers,
+        on="customer_id",
+        how="left"
+    )
+
+    # 4b) attach order items → products → category translation
+    items_prod = order_items.merge(
+        products[["product_id","product_category_name"]],
+        on="product_id", how="left"
+    ).merge(
+        cats.rename(columns={"product_category_name": "category_code"}),
+        left_on="product_category_name",
+        right_on="category_code",
+        how="left"
+    )
+
+    df = df.merge(
+        items_prod,
+        on="order_id",
+        how="left"
+    )
+
+    # 4c) attach payments, reviews, sellers
+    df = df.merge(payments, on="order_id", how="left")
+    df = df.merge(reviews,  on="order_id", how="left")
+    df = df.merge(
+        sellers.rename(columns={"seller_zip_code_prefix":"seller_zip_prefix"}),
+        left_on="seller_id",
+        right_on="seller_id",
+        how="left"
+    )
+
+    # 5) Cleanup types & columns
+    df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     df["payment_value"] = pd.to_numeric(df["payment_value"], errors="coerce")
     df["geolocation_lat"] = pd.to_numeric(df["geolocation_lat"], errors="coerce")
     df["geolocation_lng"] = pd.to_numeric(df["geolocation_lng"], errors="coerce")
-    if "category_code" in df.columns:
+    if "category_code" in df:
         df = df.drop(columns=["category_code"])
 
     return df
 
 df = load_data()
 
+# ── Dashboard ─────────────────────────────────────────────────────────────────
 
-# ── Dashboard Sections ─────────────────────────────────────────────────────────
+st.title("📊 Olist Customer Characterization Dashboard")
 
 # KPIs
-st.title("📊 Olist Customer Characterization Dashboard")
-total_orders    = df["order_id"].nunique()
-total_customers = df["customer_unique_id"].nunique()
-total_revenue   = df["payment_value"].sum()
+c_orders   = df["order_id"].nunique()
+c_customers = df["customer_unique_id"].nunique()
+revenue    = df["payment_value"].sum()
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Total Orders",        f"{total_orders:,}")
-c2.metric("Total Customers",     f"{total_customers:,}")
-c3.metric("Total Revenue (BRL)", f"R$ {total_revenue:,.2f}")
+c1.metric("Total Orders",        f"{c_orders:,}")
+c2.metric("Total Customers",     f"{c_customers:,}")
+c3.metric("Total Revenue (BRL)", f"R$ {revenue:,.2f}")
 
 st.markdown("---")
 
-
 # Top 10 Products
 st.subheader("🏆 Top 10 Products by Order Count")
-top_products = (
-    df["category_name"]
-      .value_counts()
-      .nlargest(10)
-      .rename_axis("Product")
-      .reset_index(name="Count")
-)
-st.bar_chart(top_products.set_index("Product")["Count"])
-
+tp = df["category_name"].value_counts().nlargest(10).rename_axis("Product").reset_index(name="Count")
+st.bar_chart(tp.set_index("Product")["Count"])
 
 # Top 10 Buyers
 st.subheader("🛍️ Top 10 Buyers by Lifetime Spend")
-top_buyers = (
-    df.groupby("customer_unique_id")["payment_value"]
-      .sum()
-      .nlargest(10)
-      .reset_index(name="Total Spend")
-)
-st.bar_chart(top_buyers.set_index("customer_unique_id")["Total Spend"])
+tb = df.groupby("customer_unique_id")["payment_value"].sum().nlargest(10).reset_index(name="Total Spend")
+st.bar_chart(tb.set_index("customer_unique_id")["Total Spend"])
 
-
-# Geospatial Map
+# Geomap
 st.subheader("📍 Purchase Locations")
-locs = (
-    df.groupby(["geolocation_lat", "geolocation_lng"])
-      .size()
-      .reset_index(name="Order Count")
-      .dropna()
-)
+locs = df.groupby(["geolocation_lat","geolocation_lng"]).size().reset_index(name="Order Count").dropna()
 deck = pdk.Deck(
     map_style="mapbox://styles/mapbox/light-v9",
     initial_view_state=pdk.ViewState(
         latitude=locs["geolocation_lat"].mean(),
         longitude=locs["geolocation_lng"].mean(),
-        zoom=4,
-        pitch=0
+        zoom=4
     ),
-    layers=[
-        pdk.Layer(
-            "ScatterplotLayer",
-            data=locs,
-            get_position=["geolocation_lng", "geolocation_lat"],
-            get_radius="Order Count * 50",
-            pickable=True
-        )
-    ]
+    layers=[pdk.Layer(
+        "ScatterplotLayer",
+        data=locs,
+        get_position=["geolocation_lng","geolocation_lat"],
+        get_radius="Order Count * 50",
+        pickable=True
+    )]
 )
 st.pydeck_chart(deck)
 
-
-# Payment Method Breakdown
+# Payments
 st.subheader("💳 Payment Method Breakdown")
 pm = df["payment_type"].value_counts().rename_axis("Method").reset_index(name="Count")
 st.dataframe(pm)
 
 st.markdown("---")
 
-
-# Orders Over Time
+# Time Series
 st.subheader("📈 Orders Over Time")
 df["month"] = df["order_purchase_timestamp"].dt.to_period("M").dt.to_timestamp()
-orders_ts = df.groupby("month").size().rename("Order Count")
-st.line_chart(orders_ts)
+ts = df.groupby("month").size().rename("Order Count")
+st.line_chart(ts)
+
 
 

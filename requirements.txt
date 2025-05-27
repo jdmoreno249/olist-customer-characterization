@@ -1,7 +1,5 @@
 gdown
 pandas
 streamlit
-sqlite3
-streamlit
 pydeck
 

@@ -13,10 +13,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── Data Download & Build ──────────────────────────────────────────────────────
-@st.cache_data(show_spinner=False)
+# ── Data Download & Build with Debugging ────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=0)  # disable cache persistence for debugging
 def load_data():
-    # Download raw CSVs if missing
     FILE_IDS = {
         "olist_category_name_translation.csv": "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
         "olist_customers_dataset.csv":         "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
@@ -30,16 +29,35 @@ def load_data():
     }
     raw_dir = os.path.join("data", "raw")
     os.makedirs(raw_dir, exist_ok=True)
+
+    # Download and check files
     for fname, fid in FILE_IDS.items():
         dest = os.path.join(raw_dir, fname)
         if not os.path.isfile(dest):
-            gdown.download(f"https://drive.google.com/uc?export=download&id={fid}",
-                           dest, quiet=True)
+            st.write(f"Downloading {fname}...")
+            gdown.download(
+                f"https://drive.google.com/uc?export=download&id={fid}",
+                dest,
+                quiet=False  # show download progress
+            )
+        # Debug file existence and size
+        exists = os.path.isfile(dest)
+        size = os.path.getsize(dest) if exists else None
+        st.write(f"File {fname} exists: {exists}, size: {size}")
 
-    # Load all CSVs
-    raw = {f: pd.read_csv(os.path.join(raw_dir, f)) for f in FILE_IDS}
+    # Load and inspect CSVs
+    raw = {}
+    for fname in FILE_IDS:
+        path = os.path.join(raw_dir, fname)
+        try:
+            df = pd.read_csv(path)
+            raw[fname] = df
+            st.write(f"Loaded {fname}: shape={df.shape}, columns={df.columns.tolist()}")
+        except Exception as e:
+            st.write(f"Error loading {fname}: {e}")
+            raw[fname] = pd.DataFrame()
 
-    # Map to meaningful variables
+    # Map DataFrames
     customers_meta = raw["olist_category_name_translation.csv"]
     cat_translate  = raw["olist_customers_dataset.csv"]
     seller_meta    = raw["olist_geolocation_dataset.csv"]
@@ -50,138 +68,83 @@ def load_data():
     product_specs  = raw["olist_orders_dataset.csv"]
     sellers_df     = raw["olist_sellers_dataset.csv"]
 
-    # Enrich customers with average geolocation per zip
+    # Enrich customers with geolocation
     geo_summary = (
         geoloc_meta
         .groupby("geolocation_zip_code_prefix")[["geolocation_lat","geolocation_lng"]]
-        .mean()
-        .reset_index()
+        .mean().reset_index()
     )
+    st.write(f"geo_summary: shape={geo_summary.shape}, columns={geo_summary.columns.tolist()}")
     customers = customers_meta.merge(
         geo_summary,
         left_on="customer_zip_code_prefix",
         right_on="geolocation_zip_code_prefix",
         how="left"
     )
+    st.write(f"After merging customers: shape={customers.shape}, columns={customers.columns.tolist()}")
 
-    # Build the fact table
-    df = sellers_df.copy()  # has order_item_id
+    # Build fact table starting from sellers_df
+    df = sellers_df.copy()
+    st.write(f"Start sellers_df: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Attach order-level data: customer_id & purchase timestamp
+    # Merge order-level info
     df = df.merge(
         orders_meta[["order_id","customer_id","order_purchase_timestamp"]],
-        on="order_id", how="left"
+        on="order_id",
+        how="left"
     )
+    st.write(f"After merging orders_meta: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Attach customer metadata + geo
+    # Merge customers
     df = df.merge(customers, on="customer_id", how="left")
+    st.write(f"After merging customers: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Attach product specs (category code)
+    # Merge product specs
     df = df.merge(
         product_specs[["product_id","product_category_name"]],
-        on="product_id", how="left"
+        on="product_id",
+        how="left"
     )
+    st.write(f"After merging product_specs: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Translate category to English
+    # Merge category translation
     df = df.merge(
         cat_translate[["product_category_name","product_category_name_english"]],
-        on="product_category_name", how="left"
+        on="product_category_name",
+        how="left"
     ).rename(columns={"product_category_name_english":"category_name"})
+    st.write(f"After merging cat_translate: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Attach payments & reviews
+    # Merge payments and reviews
     df = df.merge(
         payments_meta[["order_id","payment_type","payment_value"]],
-        on="order_id", how="left"
+        on="order_id",
+        how="left"
     )
+    st.write(f"After merging payments: shape={df.shape}, columns={df.columns.tolist()}")
     df = df.merge(
         reviews_meta[["order_id","review_score"]],
-        on="order_id", how="left"
+        on="order_id",
+        how="left"
     )
+    st.write(f"After merging reviews: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Attach seller metadata (city/state)
+    # Merge seller metadata
     df = df.merge(seller_meta, on="seller_id", how="left")
+    st.write(f"After merging seller_meta: shape={df.shape}, columns={df.columns.tolist()}")
 
-    # Final cleaning & type conversions
+    # Clean types
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     df["payment_value"]            = pd.to_numeric(df["payment_value"], errors="coerce")
     df["geolocation_lat"]          = pd.to_numeric(df["geolocation_lat"], errors="coerce")
     df["geolocation_lng"]          = pd.to_numeric(df["geolocation_lng"], errors="coerce")
+    st.write(f"Final df: shape={df.shape}, columns={df.columns.tolist()}")
 
     return df
 
+# Load data and display first rows for sanity
+st.title("📊 Debugging Olist Data Pipeline")
 df = load_data()
+st.dataframe(df.head(10))
 
-# ── Dashboard ──────────────────────────────────────────────────────────────────
-st.title("📊 Olist Customer Characterization Dashboard")
-
-# KPIs
-n_orders     = df["order_id"].nunique()
-n_customers  = df["customer_unique_id"].nunique()
-total_revenue= df["payment_value"].sum()
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Total Orders",        f"{n_orders:,}")
-c2.metric("Total Customers",     f"{n_customers:,}")
-c3.metric("Total Revenue (BRL)", f"R$ {total_revenue:,.2f}")
-
-st.markdown("---")
-
-# Top 10 Products
-st.subheader("🏆 Top 10 Products by Order Count")
-tp = (
-    df["category_name"]
-      .value_counts()
-      .nlargest(10)
-      .rename_axis("Product")
-      .reset_index(name="Count")
-)
-st.bar_chart(tp.set_index("Product")["Count"])
-
-# Top 10 Buyers
-st.subheader("🛍️ Top 10 Buyers by Lifetime Spend")
-tb = (
-    df.groupby("customer_unique_id")["payment_value"]
-      .sum()
-      .nlargest(10)
-      .reset_index(name="Total Spend")
-)
-st.bar_chart(tb.set_index("customer_unique_id")["Total Spend"])
-
-# Purchase Locations Map
-st.subheader("📍 Purchase Locations")
-locs = (
-    df.groupby(["geolocation_lat","geolocation_lng"])
-      .size()
-      .reset_index(name="Order Count")
-      .dropna()
-)
-deck = pdk.Deck(
-    map_style="mapbox://styles/mapbox/light-v9",
-    initial_view_state=pdk.ViewState(
-        latitude=locs["geolocation_lat"].mean(),
-        longitude=locs["geolocation_lng"].mean(),
-        zoom=4
-    ),
-    layers=[pdk.Layer(
-        "ScatterplotLayer",
-        data=locs,
-        get_position=["geolocation_lng","geolocation_lat"],
-        get_radius="Order Count * 50",
-        pickable=True
-    )]
-)
-st.pydeck_chart(deck)
-
-# Payment Method Breakdown
-st.subheader("💳 Payment Method Breakdown")
-pm = df["payment_type"].value_counts().rename_axis("Method").reset_index(name="Count")
-st.dataframe(pm)
-
-st.markdown("---")
-
-# Orders Over Time
-st.subheader("📈 Orders Over Time")
-df["month"] = df["order_purchase_timestamp"].dt.to_period("M").dt.to_timestamp()
-orders_ts = df.groupby("month").size().rename("Order Count")
-st.line_chart(orders_ts)
-
+# ... Then you can add visualization code below once pipeline is confirmed working ...

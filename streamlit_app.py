@@ -17,33 +17,36 @@ st.set_page_config(
 @st.cache_data(show_spinner=False, ttl=0)  # disable cache persistence for debugging
 def load_data():
     FILE_IDS = {
-    # Category translation (≈9 MB)
-    "olist_category_name_translation.csv": "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
+        # Category translation (≈9 MB)
+        "olist_category_name_translation.csv": "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
 
-    # Sellers metadata (≈175 KB)
-    "olist_sellers_dataset.csv":           "1s_L2-JC6MobsEmKNBQ41ezbCe6V3YrY4",
+        # Small customer metadata (≈2.6 KB)
+        "olist_customers_dataset.csv":         "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
 
-    # Order-products/payment mapping (≈2.4 MB)
-    "olist_products_dataset.csv":          "1Ux4yYn90rHv1gZBk-L2CgdZcNtEiabzD",
+        # Sellers metadata (≈175 KB)
+        "olist_sellers_dataset.csv":           "1s_L2-JC6MobsEmKNBQ41ezbCe6V3YrY4",
 
-    # Product specs (≈17.7 MB)
-    "olist_orders_dataset.csv":            "1MqAAQcsyPV204GdnLHofHn1U8lJ4TYG4",
+        # Product specs (≈2.4 MB)
+        "olist_orders_dataset.csv":            "1Ux4yYn90rHv1gZBk-L2CgdZcNtEiabzD",
 
-    # Customer reviews geolocation (≈61 MB)
-    "olist_order_reviews_dataset.csv":     "1koSHpwLEkbZ3Q4M5qxdn8vDBOqWxpefn",
+        # Product category translation (≈71 rows)
+        "olist_customers_dataset.csv":         "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
 
-    # Order-payment records (≈14.5 MB)
-    "olist_order_payments_dataset.csv":    "1HHia6OiZA084ejjLIFm4qqyC_6df1FHh",
+        # Products measurements (≈5.78 MB)
+        "olist_products_dataset.csv":          "1HHia6OiZA084ejjLIFm4qqyC_6df1FHh",
 
-    # Order-items master (≈15.4 MB)
-    "olist_order_items_dataset.csv":       "1PYUU0pdkAE7xm1nXFFkIDHiR0-_VPuCt",
+        # Payments (≈2.38 MB)
+        "olist_order_payments_dataset.csv":    "1MqAAQcsyPV204GdnLHofHn1U8lJ4TYG4",
 
-    # Customer geolocation lookup (≈61 MB)
-    "olist_geolocation_dataset.csv":       "1GyDACu8Jt2DFA6ldl1BshL9_qpvSJsYb",
+        # Reviews (≈61.3 MB)
+        "olist_order_reviews_dataset.csv":     "1GyDACu8Jt2DFA6ldl1BshL9_qpvSJsYb",
 
-    # Small customer metadata (≈2.6 KB)
-    "olist_customers_dataset.csv":         "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
-}
+        # Order items (≈17.7 MB)
+        "olist_order_items_dataset.csv":       "1koSHpwLEkbZ3Q4M5qxdn8vDBOqWxpefn",
+
+        # Geolocation lookup (≈15.4 MB)
+        "olist_geolocation_dataset.csv":       "1PYUU0pdkAE7xm1nXFFkIDHiR0-_VPuCt",
+    }
     raw_dir = os.path.join("data", "raw")
     os.makedirs(raw_dir, exist_ok=True)
 

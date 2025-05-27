@@ -16,7 +16,6 @@ st.set_page_config(
 # ── Data Download & Build ──────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data():
-    # 1) Download raw CSVs
     FILE_IDS = {
         "olist_category_name_translation.csv": "19YQGpVKifSM0qR04sCLUtiflz4RHX547",
         "olist_customers_dataset.csv":         "1wTlgBc515BR2DR5Wgff0Cd-XFuHwb80V",
@@ -36,89 +35,92 @@ def load_data():
             gdown.download(f"https://drive.google.com/uc?export=download&id={fid}",
                            dest, quiet=True)
 
-    # 2) Read into pandas
     raw = {f: pd.read_csv(os.path.join(raw_dir, f)) for f in FILE_IDS}
 
-    # 3) Assign DataFrames by content
-    cust_meta    = raw["olist_category_name_translation.csv"]
-    cat_translate= raw["olist_customers_dataset.csv"]
-    seller_meta  = raw["olist_geolocation_dataset.csv"]
-    order_items  = raw["olist_order_items_dataset.csv"]
-    payments     = raw["olist_products_dataset.csv"]
-    reviews      = raw["olist_order_payments_dataset.csv"]
-    geoloc       = raw["olist_order_reviews_dataset.csv"]
-    prod_specs   = raw["olist_orders_dataset.csv"]
-    sellers      = raw["olist_sellers_dataset.csv"]
+    # Assign by actual content
+    customers     = raw["olist_category_name_translation.csv"]
+    cat_translate = raw["olist_customers_dataset.csv"]
+    seller_meta   = raw["olist_geolocation_dataset.csv"]
+    order_items   = raw["olist_order_items_dataset.csv"]
+    payments      = raw["olist_products_dataset.csv"]
+    reviews       = raw["olist_order_payments_dataset.csv"]
+    geoloc        = raw["olist_order_reviews_dataset.csv"]
+    prod_specs    = raw["olist_orders_dataset.csv"]
+    sellers       = raw["olist_sellers_dataset.csv"]
 
-    # 4) Build customer geolocation
-    #   join cust_meta on customer_zip_code_prefix -> geoloc
-    cust_geo = cust_meta.merge(
-        geoloc,
+    # Enrich customers with geolocation
+    geo_summary = (
+        geoloc
+        .groupby("geolocation_zip_code_prefix")[["geolocation_lat","geolocation_lng"]]
+        .mean()
+        .reset_index()
+    )
+    customers = customers.merge(
+        geo_summary,
         left_on="customer_zip_code_prefix",
         right_on="geolocation_zip_code_prefix",
         how="left"
     )
 
-    # 5) Start fact table: order_items + cust_geo
-    df = order_items.merge(cust_geo, on="customer_id", how="left")
+    # Build fact table: start with order_items + customers
+    df = order_items.merge(customers, on="customer_id", how="left")
 
-    # 6) Attach seller pricing info
+    # Attach seller pricing/info
     df = df.merge(
         sellers,
-        on=["order_id", "order_item_id", "product_id", "seller_id"],
+        on=["order_id","order_item_id","product_id","seller_id"],
         how="left"
     )
 
-    # 7) Attach product specs (category code)
+    # Attach product specs (has product_category_name)
     df = df.merge(
         prod_specs[["product_id","product_category_name"]],
         on="product_id",
         how="left"
     )
 
-    # 8) Translate category code → category_name
+    # Translate category name: merge on product_category_name
     df = df.merge(
-        cat_translate.rename(columns={
-            "product_category_name": "category_code",
-            "product_category_name_english": "category_name"
-        }),
-        on="category_code",
+        cat_translate[["product_category_name","product_category_name_english"]],
+        on="product_category_name",
         how="left"
     )
+    df = df.rename(columns={"product_category_name_english":"category_name"})
 
-    # 9) Attach payments & reviews
+    # Attach payments & reviews
     df = df.merge(payments[["order_id","payment_type","payment_value"]], on="order_id", how="left")
-    df = df.merge(reviews [["order_id","review_score"]], on="order_id", how="left")
+    df = df.merge(reviews[["order_id","review_score"]], on="order_id", how="left")
 
-    # 10) Attach seller metadata (city/state)
+    # Attach seller metadata (city/state)
     df = df.merge(
         seller_meta,
         on="seller_id",
         how="left"
     )
 
-    # 11) Clean types
+    # Clean & convert types
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
-    df["payment_value"] = pd.to_numeric(df["payment_value"], errors="coerce")
-    df["geolocation_lat"] = pd.to_numeric(df["geolocation_lat"], errors="coerce")
-    df["geolocation_lng"] = pd.to_numeric(df["geolocation_lng"], errors="coerce")
+    df["payment_value"]            = pd.to_numeric(df["payment_value"], errors="coerce")
+    df["geolocation_lat"]          = pd.to_numeric(df["geolocation_lat"], errors="coerce")
+    df["geolocation_lng"]          = pd.to_numeric(df["geolocation_lng"], errors="coerce")
 
     return df
 
 df = load_data()
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
+
 st.title("📊 Olist Customer Characterization Dashboard")
 
 # KPIs
 n_orders    = df["order_id"].nunique()
 n_customers = df["customer_unique_id"].nunique()
-revenue     = df["payment_value"].sum()
+total_revenue = df["payment_value"].sum()
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Total Orders",        f"{n_orders:,}")
 c2.metric("Total Customers",     f"{n_customers:,}")
-c3.metric("Total Revenue (BRL)", f"R$ {revenue:,.2f}")
+c3.metric("Total Revenue (BRL)", f"R$ {total_revenue:,.2f}")
 
 st.markdown("---")
 
@@ -140,7 +142,8 @@ deck = pdk.Deck(
     initial_view_state=pdk.ViewState(
         latitude=locs["geolocation_lat"].mean(),
         longitude=locs["geolocation_lng"].mean(),
-        zoom=4),
+        zoom=4
+    ),
     layers=[pdk.Layer(
         "ScatterplotLayer",
         data=locs,
@@ -163,4 +166,3 @@ st.subheader("📈 Orders Over Time")
 df["month"] = df["order_purchase_timestamp"].dt.to_period("M").dt.to_timestamp()
 ts = df.groupby("month").size().rename("Order Count")
 st.line_chart(ts)
-
